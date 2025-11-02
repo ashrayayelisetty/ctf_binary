@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Binary → QR Puzzle</title>
+  <!-- QRious (for QR code generation) -->
+  <script src="https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js"></script>
+  <style>
+    :root{
+      --bg:#0f1724;
+      --card:#0b1220;
+      --accent:#7dd3fc;
+      --muted:#94a3b8;
+      --ok:#34d399;
+      --err:#fb7185;
+      --glass: rgba(255,255,255,0.03);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      background: linear-gradient(180deg, #061024 0%, #07122a 100%);
+      color: #e6eef8;
+      padding: 36px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .container{
+      width:100%;
+      max-width:980px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02));
+      border-radius:12px;
+      padding:28px;
+      box-shadow: 0 8px 30px rgba(2,6,23,0.6);
+      border: 1px solid rgba(255,255,255,0.03);
+    }
+    header{
+      margin-bottom:18px;
+    }
+    header h1{
+      margin:0;
+      font-size:20px;
+    }
+    header p{margin:0;color:var(--muted);font-size:13px}
+    .grid{
+      display:grid;
+      grid-template-columns: 1fr 420px;
+      gap:18px;
+    }
+    .card{
+      background:var(--card);
+      border-radius:10px;
+      padding:18px;
+      border:1px solid rgba(255,255,255,0.02);
+    }
+    label{display:block;font-size:13px;color:var(--muted);margin-bottom:8px}
+    input[type="text"]{
+      width:100%;
+      padding:12px 14px;
+      border-radius:8px;
+      border:1px solid rgba(255,255,255,0.04);
+      background:var(--glass);
+      color:inherit;
+      font-family:monospace;
+      font-size:15px;
+      outline:none;
+    }
+    .hint{
+      margin-top:10px;
+      font-size:13px;
+      color:var(--muted);
+    }
+    .actions{
+      margin-top:14px;
+      display:flex;
+      gap:8px;
+      align-items:center;
+    }
+    button{
+      cursor:pointer;
+      border:0;
+      padding:10px 14px;
+      border-radius:8px;
+      background:linear-gradient(180deg,var(--accent), #38bdf8);
+      color:#012028;
+      font-weight:600;
+      box-shadow: 0 6px 18px rgba(7,89,118,0.12);
+    }
+    button.ghost{
+      background:transparent;
+      color:var(--muted);
+      border:1px solid rgba(255,255,255,0.03);
+      font-weight:600;
+    }
+    .message{margin-top:12px;font-size:14px}
+    .message.ok{color:var(--ok)}
+    .message.err{color:var(--err)}
+    /* QR area */
+    .qr-wrap{
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      gap:12px;
+      min-height:240px;
+    }
+    .qr-card{
+      width:100%;
+      padding:12px;
+      border-radius:8px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+      border: 1px dashed rgba(255,255,255,0.03);
+      min-height:160px;
+    }
+    canvas#qrcode{ display:none; }
+    .meta{
+      font-size:13px;
+      color:var(--muted);
+      text-align:center;
+    }
+    footer{margin-top:18px;text-align:center;color:var(--muted);font-size:13px}
+    @media (max-width:900px){
+      .grid{grid-template-columns:1fr;}
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Binary → QR Puzzle</h1>
+      <p>Enter the correct binary string to reveal a QR code. Scanning it will show the hidden flag.</p>
+    </header>
+
+    <div class="grid">
+      <!-- Left: Input -->
+      <div class="card">
+        <label for="binaryInput">Enter binary (0/1 only)</label>
+        <input id="binaryInput" type="text" inputmode="numeric" placeholder="e.g. 0101010011101" autocomplete="off" />
+        <div class="hint">
+          Hint: Only 0 and 1 are accepted. Spaces are ignored.
+        </div>
+
+        <div class="actions">
+          <button id="submitBtn">Submit</button>
+          <button id="resetBtn" class="ghost">Reset</button>
+        </div>
+
+        <div id="feedback" class="message"></div>
+      </div>
+
+      <!-- Right: QR display -->
+      <aside class="card qr-wrap">
+        <div class="qr-card" id="qrCard">
+          <div id="placeholder">
+            <div style="text-align:center;color:var(--muted)">QR code will appear here when solved</div>
+          </div>
+          <canvas id="qrcode" width="200" height="200"></canvas>
+        </div>
+        <div class="meta" id="scanHint" style="display:none;">
+          Scan this QR with your phone to reveal the secret flag.
+        </div>
+      </aside>
+    </div>
+
+    <footer>
+      Tip: The flag is only inside the QR — not visible in the source.
+    </footer>
+  </div>
+
+  <script>
+    // ----------------- CONFIG -----------------
+    const SECRET_FLAG = "GDGC{Logic_Gates?!}";
+    const CORRECT_BINARY = "1011";
+    // ------------------------------------------
+
+    function normalizeBinary(s){
+      return (s || "").toString().replace(/[^01]/g, "");
+    }
+
+    const input = document.getElementById("binaryInput");
+    const submitBtn = document.getElementById("submitBtn");
+    const resetBtn = document.getElementById("resetBtn");
+    const feedback = document.getElementById("feedback");
+    const placeholder = document.getElementById("placeholder");
+    const qrCanvas = document.getElementById("qrcode");
+    const scanHint = document.getElementById("scanHint");
+    let qr;
+
+    function clearMessage(){
+      feedback.textContent = "";
+      feedback.className = "message";
+    }
+
+    function trySubmit(){
+      clearMessage();
+      const norm = normalizeBinary(input.value);
+      if(!norm){
+        feedback.textContent = "Please enter a binary string.";
+        feedback.classList.add("err");
+        return;
+      }
+      if(norm.length < 4){
+        feedback.textContent = "Too short — try a longer binary sequence.";
+        feedback.classList.add("err");
+        return;
+      }
+
+      if(norm === CORRECT_BINARY){
+        feedback.textContent = "Correct! Generating QR…";
+        feedback.classList.add("ok");
+        revealQR();
+      } else {
+        feedback.textContent = "Incorrect binary sequence — try again.";
+        feedback.classList.add("err");
+      }
+    }
+
+    function revealQR(){
+      placeholder.style.display = "none";
+      qrCanvas.style.display = "block";
+      scanHint.style.display = "block";
+
+      // Create QR code that encodes only the flag (not shown on page)
+      qr = new QRious({
+        element: qrCanvas,
+        value: SECRET_FLAG,
+        size: 220,
+        level: "H",
+        background: "transparent",
+        foreground: "#7dd3fc"
+      });
+    }
+
+    function resetAll(){
+      input.value = "";
+      clearMessage();
+      placeholder.style.display = "block";
+      qrCanvas.style.display = "none";
+      scanHint.style.display = "none";
+    }
+
+    submitBtn.addEventListener("click", trySubmit);
+    resetBtn.addEventListener("click", resetAll);
+    input.addEventListener("keydown", e => {
+      if(e.key === "Enter") trySubmit();
+    });
+
+    resetAll();
+  </script>
+</body>
+</html>
